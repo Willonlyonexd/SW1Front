@@ -405,6 +405,36 @@ useEffect(() => {
       }
     }
   });
+  socket.on('link_text_updated', (data) => {
+    const { fromNode, toNode, fromText, toText } = data;
+    const model = diagramInstance.current.model;
+
+    // Buscar el enlace correspondiente en el modelo y actualizar los textos
+    const linkToUpdate = model.linkDataArray.find(
+      link => link.from === fromNode && link.to === toNode
+    );
+
+    if (linkToUpdate) {
+      model.setDataProperty(linkToUpdate, 'fromText', fromText);
+      model.setDataProperty(linkToUpdate, 'toText', toText);
+    }
+  });
+
+  socket.on('association_direct_text_updated', (data) => {
+    const { fromNode, toNode, fromText, toText } = data;
+    const model = diagramInstance.current.model;
+
+    // Buscar el enlace correspondiente en el modelo y actualizar los textos
+    const linkToUpdate = model.linkDataArray.find(
+      link => link.from === fromNode && link.to === toNode && link.category === "AssociationDirect"
+    );
+
+    if (linkToUpdate) {
+      model.setDataProperty(linkToUpdate, 'fromText', fromText);
+      model.setDataProperty(linkToUpdate, 'toText', toText);
+    }
+  });
+
 
  
   socket.on('chat_message_broadcast', (data) => {
@@ -434,6 +464,10 @@ useEffect(() => {
     socket.off('chat_message_broadcast');
     socket.off('chat_message_broadcast');
     socket.off('users_in_room');
+    socket.off('update_link_text');
+    socket.off('association_direct_text_updated');
+
+
   };
 }, [props.roomCode]);
 
@@ -548,52 +582,53 @@ diagramInstance.current.addDiagramListener('ObjectSingleClicked', (e) => {
 });
 
 
-      // ---------------------- Definición de Enlaces -------------------//
-      // Asociación
-      diagramInstance.current.linkTemplateMap.add("Association", 
-        $(go.Link, {
-            routing: go.Link.Normal,
-            curve: go.Link.None,
-            reshapable: true, resegmentable: true,
-            fromSpot: go.Spot.AllSides, toSpot: go.Spot.AllSides
-          },
-          $(go.Shape),
-          $(go.Shape, { toArrow: "" }), 
-          $(go.TextBlock, "1..1", { segmentIndex: 0, segmentOffset: new go.Point(NaN, NaN), editable: true }, 
-            new go.Binding("text", "fromText").makeTwoWay()),
-          $(go.TextBlock, "1..1", { segmentIndex: -1, segmentOffset: new go.Point(NaN, NaN), editable: true }, 
-            new go.Binding("text", "toText").makeTwoWay())
-        )
-      );
+diagramInstance.current.linkTemplateMap.add("Association", 
+  $(go.Link, {
+      routing: go.Link.Normal,
+      curve: go.Link.None,
+      reshapable: true, resegmentable: true,
+      fromSpot: go.Spot.AllSides, toSpot: go.Spot.AllSides
+    },
+    $(go.Shape),  // Línea básica
+    $(go.Shape, { toArrow: "" }), // Sin flecha por defecto
+    $(go.TextBlock, "1..1", { 
+      segmentIndex: 0, 
+      segmentOffset: new go.Point(NaN, NaN), 
+      editable: true,  // Permitir la edición del texto
+    }, 
+    new go.Binding("text", "fromText").makeTwoWay()), // Enlazamos con el texto de origen
+    $(go.TextBlock, "1..1", { 
+      segmentIndex: -1, 
+      segmentOffset: new go.Point(NaN, NaN), 
+      editable: true,  // Permitir la edición del texto
+    }, 
+    new go.Binding("text", "toText").makeTwoWay()) // Enlazamos con el texto de destino
+  )
+);
 
        // Asociación
        diagramInstance.current.linkTemplateMap.add("AssociationDirect", 
         $(go.Link, {
-            routing: go.Link.Normal,
-            curve: go.Link.None,
-            reshapable: true, resegmentable: true,
-            fromSpot: go.Spot.AllSides, toSpot: go.Spot.AllSides
-          },
-          $(go.Shape),
-          $(go.Shape, { toArrow: "Standard" }), 
-          $(go.TextBlock, "1..1", { segmentIndex: 0, segmentOffset: new go.Point(NaN, NaN), editable: true }, 
-            new go.Binding("text", "fromText").makeTwoWay()),
-          $(go.TextBlock, "1..1", { segmentIndex: -1, segmentOffset: new go.Point(NaN, NaN), editable: true }, 
-            new go.Binding("text", "toText").makeTwoWay())
-        )
-      );
-
-      // Composición
-      diagramInstance.current.linkTemplateMap.add("Composition", 
-        $(go.Link, {
-            routing: go.Link.Normal,
-            curve: go.Link.None,
-            reshapable: true, resegmentable: true,
-            fromSpot: go.Spot.AllSides, toSpot: go.Spot.AllSides
-          },
-          $(go.Shape),
-          $(go.Shape, { toArrow: "Diamond" })
-        )
+          routing: go.Link.Normal,
+          curve: go.Link.None,
+          reshapable: true, resegmentable: true,
+          fromSpot: go.Spot.AllSides, toSpot: go.Spot.AllSides
+        },
+        $(go.Shape),  // Línea básica
+        $(go.Shape, { toArrow: "Standard" }), // Sin flecha por defecto
+        $(go.TextBlock, "1..1", { 
+          segmentIndex: 0, 
+          segmentOffset: new go.Point(NaN, NaN), 
+          editable: true,  // Permitir la edición del texto
+        }, 
+        new go.Binding("text", "fromText").makeTwoWay()), // Enlazamos con el texto de origen
+        $(go.TextBlock, "1..1", { 
+          segmentIndex: -1, 
+          segmentOffset: new go.Point(NaN, NaN), 
+          editable: true,  // Permitir la edición del texto
+        }, 
+        new go.Binding("text", "toText").makeTwoWay()) // Enlazamos con el texto de destino
+      )
       );
 
       // Agregación
@@ -665,6 +700,25 @@ diagramInstance.current.linkTemplateMap.add("Dependency",
       });
     }
 
+    // Relación Muchos a Muchos (ManyToMany)
+diagramInstance.current.linkTemplateMap.add("ManyToMany", 
+  $(go.Link, {
+      routing: go.Link.AvoidsNodes, // Puedes ajustar el routing si lo necesitas
+      curve: go.Link.None, 
+      reshapable: true, 
+      resegmentable: true,
+      fromSpot: go.Spot.AllSides, toSpot: go.Spot.AllSides // Para permitir múltiples conexiones desde cualquier lado
+    },
+    $(go.Shape), // Línea básica
+    $(go.Shape, { toArrow: "" }), // Puedes definir flechas según lo desees (en este caso, sin flecha)
+    $(go.TextBlock, "1..n", { segmentIndex: 0, segmentOffset: new go.Point(NaN, NaN), editable: true }, 
+      new go.Binding("text", "fromText").makeTwoWay()), // Textos de multiplicidad desde el nodo de origen
+    $(go.TextBlock, "1..n", { segmentIndex: -1, segmentOffset: new go.Point(NaN, NaN), editable: true }, 
+      new go.Binding("text", "toText").makeTwoWay()) // Textos de multiplicidad hacia el nodo de destino
+  )
+);
+
+
     diagramInstance.current.addDiagramListener('SelectionMoved', (e) => {
       const selectedNode = e.diagram.selection.first(); // Obtener el primer nodo seleccionado
   
@@ -689,6 +743,8 @@ diagramInstance.current.linkTemplateMap.add("Dependency",
   }, [props.roomCode]);
 
   // Función de relaciones
+
+  
   const handleEnableAssociation = () => {
     // Configuramos el linkingTool para la asociación
     diagramInstance.current.toolManager.linkingTool.archetypeLinkData = {
@@ -698,11 +754,11 @@ diagramInstance.current.linkTemplateMap.add("Dependency",
     };
     diagramInstance.current.toolManager.linkingTool.isEnabled = true;
   
-    // Escuchar el evento cuando se dibuja un enlace (relación)
+    // Escuchar cuando se dibuja un enlace (relación)
     diagramInstance.current.addDiagramListener("LinkDrawn", (e) => {
       const link = e.subject;
   
-      // Emitir la relación a través del socket
+      // Emitir la relación a través del socket cuando se crea
       socket.emit('add_association', {
         roomCode: props.roomCode,
         fromNode: link.fromNode.data.key,
@@ -712,33 +768,68 @@ diagramInstance.current.linkTemplateMap.add("Dependency",
         toText: link.data.toText || "1..1",
       });
     });
-  };
-
-    // Función de relaciones
-    const handleEnableAssociationDirect = () => {
-      // Configuramos el linkingTool para la asociación directa
-      diagramInstance.current.toolManager.linkingTool.archetypeLinkData = {
-        category: "AssociationDirect",
-        fromText: "1..1",
-        toText: "1..1",
-      };
-      diagramInstance.current.toolManager.linkingTool.isEnabled = true;
-    
-      // Escuchar el evento cuando se dibuja un enlace (relación directa)
-      diagramInstance.current.addDiagramListener("LinkDrawn", (e) => {
-        const link = e.subject;
-    
-        // Emitir la relación directa a través del socket
-        socket.emit('add_association_direct', {
+  
+    // Escuchar los cambios en los textos (fromText y toText)
+    diagramInstance.current.addDiagramListener("TextEdited", (e) => {
+      const textBlock = e.subject; // El bloque de texto que fue editado
+      const link = textBlock.part; // El enlace asociado
+  
+      if (link instanceof go.Link) {
+        // Emitir los cambios en los textos a través del socket
+        socket.emit('update_link_text', {
           roomCode: props.roomCode,
           fromNode: link.fromNode.data.key,
           toNode: link.toNode.data.key,
-          category: link.data.category,
-          fromText: link.data.fromText || "1..1",
-          toText: link.data.toText || "1..1",
+          fromText: link.data.fromText,
+          toText: link.data.toText,
         });
-      });
+      }
+    });
+  };
+  
+
+  const handleEnableAssociationDirect = () => {
+    // Configuramos el linkingTool para la asociación
+    diagramInstance.current.toolManager.linkingTool.archetypeLinkData = {
+      category: "AssociationDirect",
+      fromText: "1..1",
+      toText: "1..1",
     };
+    diagramInstance.current.toolManager.linkingTool.isEnabled = true;
+  
+    // Escuchar cuando se dibuja un enlace (relación)
+    diagramInstance.current.addDiagramListener("LinkDrawn", (e) => {
+      const link = e.subject;
+  
+      // Emitir la relación a través del socket cuando se crea
+      socket.emit('add_association', {
+        roomCode: props.roomCode,
+        fromNode: link.fromNode.data.key,
+        toNode: link.toNode.data.key,
+        category: link.data.category,
+        fromText: link.data.fromText || "1..1",
+        toText: link.data.toText || "1..1",
+      });
+    });
+  
+    // Escuchar los cambios en los textos (fromText y toText)
+    diagramInstance.current.addDiagramListener("TextEdited", (e) => {
+      const textBlock = e.subject; // El bloque de texto que fue editado
+      const link = textBlock.part; // El enlace asociado
+  
+      if (link instanceof go.Link) {
+        // Emitir los cambios en los textos a través del socket
+        socket.emit('update_link_text', {
+          roomCode: props.roomCode,
+          fromNode: link.fromNode.data.key,
+          toNode: link.toNode.data.key,
+          fromText: link.data.fromText,
+          toText: link.data.toText,
+        });
+      }
+    });
+  };
+    
 
     const handleEnableComposition = () => {
       // Configuramos el linkingTool para la composición
@@ -894,22 +985,22 @@ const handleEnableManyToMany = () => {
         from: fromNode,
         to: intermediateEntityName,
         category: "Association",
-        fromText: "1..n",
-        toText: "1..n",
+        fromText: "",
+        toText: "",
       });
       model.addLinkData({
         from: toNode,
         to: intermediateEntityName,
         category: "Association",
-        fromText: "1..n",
-        toText: "1..n",
+        fromText: "",
+        toText: "",
       });
 
       // Emitir el evento al servidor a través de WebSocket
       socket.emit('add_many_to_many', {
         roomCode: props.roomCode,
-        fromNodeId: fromNode,
-        toNodeId: toNode,
+        fromNode: link.fromNode.data.key,
+        toNode: link.toNode.data.key,
         intermediateNodeId: intermediateEntityName,
         fromText: "1..n",
         toText: "1..n",
@@ -923,13 +1014,12 @@ const handleEnableManyToMany = () => {
   
 
 
-
 const handleEnableDependency = () => {
   // Configurar el linkingTool para la categoría de Dependencia
   diagramInstance.current.toolManager.linkingTool.archetypeLinkData = {
     category: "Dependency",
-    fromText: "depends on",
-    toText: "depends on",
+    fromText: "",
+    toText: "",
   };
   diagramInstance.current.toolManager.linkingTool.isEnabled = true;
 
@@ -940,10 +1030,11 @@ const handleEnableDependency = () => {
     // Emitir el evento al servidor a través de WebSocket
     socket.emit('add_dependency', {
       roomCode: props.roomCode,
-      fromNodeId: link.fromNode.data.key,
-      toNodeId: link.toNode.data.key,
-      fromText: "depends on",
-      toText: "depends on",
+      fromNode: link.fromNode.data.key,
+      toNode: link.toNode.data.key,
+      category: link.data.category,
+      fromText: link.data.fromText || "1..1",
+      toText: link.data.toText || "1..1",
     });
   });
 };
