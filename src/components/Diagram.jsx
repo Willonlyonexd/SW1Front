@@ -20,13 +20,27 @@ const Diagram = forwardRef((props, ref) => {
   const [message, setMessage] = useState(""); // Para almacenar el mensaje actual
   const [chatMessages, setChatMessages] = useState([]); 
   const [connectedUsers, setConnectedUsers] = useState([]);
+  //const [] = useState(null);
 
 
 
 const handleLeaveRoom = () => {
   socket.emit('leave_room', { roomCode: props.roomCode, username: 'TuNombreDeUsuario' });
-  window.location.href = 'http://localhost:5173/dashboard'; 
+  window.location.href = 'http://:5173/dashboard'; 
 };
+const enableGeneralLinking = () => {
+  if (diagramInstance.current) {
+    // Restablecer la herramienta de enlace y eliminar la recursividad
+    const toolManager = diagramInstance.current.toolManager.linkingTool;
+    toolManager.isEnabled = true; // Habilitar la herramienta de enlace
+    toolManager.archetypeLinkData = {}; // Eliminar configuraciones anteriores
+    toolManager.isValidLink = go.LinkingTool.prototype.isValidLink; // Restablecer la validación predeterminada
+
+    console.log('Herramienta de enlace general habilitada.');
+  }
+};
+
+
 
   const handleAddEntity = () => {
     if (diagramInstance.current) {
@@ -336,7 +350,7 @@ useEffect(() => {
       }
     }
   });
-  socket.on('many_to_many_added', (data) => {
+  /*socket.on('many_to_many_added', (data) => {
     if (diagramInstance.current) {
       const model = diagramInstance.current.model;
       
@@ -347,12 +361,12 @@ useEffect(() => {
         // Agregar la entidad intermedia si no existe
         model.addNodeData({
           key: data.intermediateNodeId,
-          attributes: "id: int\nnombre: varchar",
+          attributes: "",
           methods: "",
           isIntermediate: true,
           loc: "0 0", // Posición provisional
         });
-
+  
         // Conectar las entidades originales con la intermedia
         model.addLinkData({
           from: data.fromNodeId,
@@ -368,9 +382,10 @@ useEffect(() => {
           fromText: data.fromText,
           toText: data.toText,
         });
-      }
+      }  
     }
   });
+  */
   socket.on('dependency_added', (data) => {
     if (diagramInstance.current) {
       const model = diagramInstance.current.model;
@@ -458,7 +473,7 @@ useEffect(() => {
     socket.off('aggregation_added');
     socket.off('generalization_added');
     socket.off('recursion_added');
-    socket.off('many_to_many_added');
+    //socket.off('many_to_many_added');
     socket.off('dependency_added');
     socket.off('node_position_updated');
     socket.off('chat_message_broadcast');
@@ -886,7 +901,6 @@ diagramInstance.current.linkTemplateMap.add("ManyToMany",
     };
 
   const handleEnableGeneralization = () => {
-  // Configuramos el linkingTool para la generalización
   diagramInstance.current.toolManager.linkingTool.archetypeLinkData = {
     category: "Generalization",
     fromText: "1..1",
@@ -914,22 +928,30 @@ diagramInstance.current.linkTemplateMap.add("ManyToMany",
 
 
 const handleEnableRecursion = () => {
+  // Restablecer la herramienta de enlace antes de habilitar un nuevo modo
+  diagramInstance.current.toolManager.linkingTool.isEnabled = false;
+  diagramInstance.current.toolManager.linkingTool.isValidLink = null; // Restablecer el valor predeterminado
+
+  // Configurar el linkingTool para recursividad
   diagramInstance.current.toolManager.linkingTool.archetypeLinkData = {
     category: "Recursion",
     fromText: "1..1",
     toText: "1..1",
   };
 
-  // Permitir que solo se creen enlaces recursivos (dentro de la misma entidad)
-  diagramInstance.current.toolManager.linkingTool.isValidLink = function(fromNode, fromPort, toNode) {
-    return fromNode === toNode; // Solo permitir enlaces de recursión dentro del mismo nodo
+  // Validar solo enlaces recursivos (de la misma entidad a sí misma)
+  diagramInstance.current.toolManager.linkingTool.isValidLink = function (fromNode, fromPort, toNode) {
+    return fromNode === toNode; // Solo permitir enlaces recursivos
   };
-  
+
   diagramInstance.current.toolManager.linkingTool.isEnabled = true;
 
   // Escuchar el evento cuando se dibuja un enlace (relación de recursión)
   diagramInstance.current.addDiagramListener("LinkDrawn", (e) => {
     const link = e.subject;
+    
+    // Iniciar una transacción para asegurar que el enlace recursivo se cree correctamente
+    diagramInstance.current.model.startTransaction("Agregar recursividad");
 
     // Emitir la relación de recursividad a través del socket
     socket.emit('add_recursion', {
@@ -939,79 +961,132 @@ const handleEnableRecursion = () => {
       fromText: link.data.fromText || "1..1",
       toText: link.data.toText || "1..1",
     });
+
+    // Terminar la transacción después de agregar el enlace recursivo
+    diagramInstance.current.model.commitTransaction("Agregar recursividad");
+
+    // **Desactivar la herramienta de enlace al completar** para no seguir aplicando la recursividad
+    diagramInstance.current.toolManager.linkingTool.isEnabled = false;
+    diagramInstance.current.toolManager.linkingTool.archetypeLinkData = null;
+    diagramInstance.current.toolManager.linkingTool.isValidLink = null;
   });
+
+  console.log("Recursividad habilitada");
 };
 
+// Socket listener para cuando se recibe la relación de recursividad
+socket.on('recursion_added', (data) => {
+  if (diagramInstance.current) {
+    const model = diagramInstance.current.model;
+
+    // Comprobar si ya existe la relación de recursividad en el nodo
+    const existingLink = model.linkDataArray.find(link =>
+      link.from === data.nodeId && link.to === data.nodeId && link.category === "Recursion"
+    );
+
+    if (!existingLink) {
+      // Iniciar una transacción para agregar el enlace recursivo
+      model.startTransaction("Agregar recursividad por socket");
+
+      // Agregar el enlace de recursividad si no existe
+      model.addLinkData({
+        from: data.nodeId,
+        to: data.nodeId,
+        category: "Recursion",
+        fromText: data.fromText,
+        toText: data.toText,
+        toArrow: "Standard", // Flecha estándar para mostrar la recursividad
+      });
+
+      // Terminar la transacción
+      model.commitTransaction("Agregar recursividad por socket");
+    }
+  }
+});
+
+
+
 const handleEnableManyToMany = () => {
+  // Configurar la herramienta de enlace para ManyToMany
   diagramInstance.current.toolManager.linkingTool.isValidLink = () => true;
 
+  // Configurar los datos del enlace como "ManyToMany"
   diagramInstance.current.toolManager.linkingTool.archetypeLinkData = {
     category: "ManyToMany",
   };
 
+  // Habilitar la herramienta de enlace
   diagramInstance.current.toolManager.linkingTool.isEnabled = true;
 
-  // Escuchar cuando se dibuja un enlace "Muchos a Muchos"
+  // Añadir listener para cuando se dibuja un enlace
   diagramInstance.current.addDiagramListener("LinkDrawn", (e) => {
     const link = e.subject;
-    
-    // Crear la tabla intermedia
     const model = diagramInstance.current.model;
     const fromNode = link.fromNode.data.key;
     const toNode = link.toNode.data.key;
-    
-    // Generar nombre para la tabla intermedia
-    const intermediateEntityName = `${fromNode}_${toNode}`;
-    
-    // Agregar la nueva entidad intermedia
-    const newIntermediateNode = {
-      key: intermediateEntityName,
-      attributes: "",
-      methods: "",
-      isIntermediate: true,
-      loc: "0 0", // Posición provisional
-    };
-    
-    // Verificar si ya existe una tabla intermedia entre estas entidades
-    const existingIntermediateNode = model.nodeDataArray.find(
-      node => node.key === intermediateEntityName
-    );
-    
-    if (!existingIntermediateNode) {
-      model.addNodeData(newIntermediateNode);
-      
-      // Crear enlaces entre las entidades originales y la entidad intermedia
-      model.addLinkData({
-        from: fromNode,
-        to: intermediateEntityName,
-        category: "Association",
-        fromText: "",
-        toText: "",
-      });
-      model.addLinkData({
-        from: toNode,
-        to: intermediateEntityName,
-        category: "Association",
-        fromText: "",
-        toText: "",
-      });
 
-      // Emitir el evento al servidor a través de WebSocket
-      socket.emit('add_many_to_many', {
-        roomCode: props.roomCode,
-        fromNode: link.fromNode.data.key,
-        toNode: link.toNode.data.key,
-        intermediateNodeId: intermediateEntityName,
-        fromText: "1..n",
-        toText: "1..n",
-      });
+    // Generar un nombre único para la tabla intermedia
+    const intermediateEntityName = `${fromNode}_${toNode}_Association`;
+
+    // Verificar si la entidad intermedia ya existe
+    const existingIntermediateNode = model.nodeDataArray.find(
+      (node) => node.key === intermediateEntityName
+    );
+
+    // Si ya existe la tabla intermedia, no hacemos nada más
+    if (existingIntermediateNode) {
+      console.log("La tabla intermedia ya existe");
+      return;
     }
 
-    // Eliminar el enlace directo entre las dos entidades originales
+    // **Eliminar el enlace directo entre las dos entidades originales**
     model.removeLinkData(link.data);
+
+    // Calcular la ubicación de la nueva entidad intermedia (en el punto medio)
+    const fromNodeLocation = go.Point.parse(link.fromNode.location.toString());
+    const toNodeLocation = go.Point.parse(link.toNode.location.toString());
+
+    const intermediateLocation = new go.Point(
+      (fromNodeLocation.x + toNodeLocation.x) / 2,
+      (fromNodeLocation.y + toNodeLocation.y) / 2
+    ).toString();
+
+    // Crear una nueva entidad intermedia
+    const newIntermediateNode = {
+      key: intermediateEntityName,
+      attributes: "id: int\nname: varchar", // Atributos por defecto para la entidad
+      methods: "", // Métodos vacíos
+      isIntermediate: true,
+      loc: intermediateLocation, // Posición en el medio de los dos nodos
+    };
+
+    // Añadir la entidad intermedia al modelo
+    model.addNodeData(newIntermediateNode);
+
+    // **Crear los enlaces desde las entidades originales a la entidad intermedia**
+    model.addLinkData({
+      from: fromNode,
+      to: intermediateEntityName,
+      category: "Association",
+      fromText: "1..n",
+      toText: "1..n",
+    });
+
+    model.addLinkData({
+      from: toNode,
+      to: intermediateEntityName,
+      category: "Association",
+      fromText: "1..n",
+      toText: "1..n",
+    });
+
+    console.log("Tabla intermedia creada con éxito");
+
+    // Desactivar la herramienta de enlace para evitar que continúe activa
+    diagramInstance.current.toolManager.linkingTool.isEnabled = false;
+    diagramInstance.current.toolManager.linkingTool.archetypeLinkData = null;
   });
-}; 
-  
+};
 
 
 const handleEnableDependency = () => {
@@ -1204,6 +1279,9 @@ const handleEnableDependency = () => {
               Agregar Método
             </button>
           </div>
+          <button onClick={enableGeneralLinking}>
+  Restablecer Enlaces
+</button>
 
           <hr className="my-4" />
 
